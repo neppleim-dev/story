@@ -118,7 +118,7 @@
         // ==========================================
         // ⚙️ 선생님 설정 영역
         // 1. 여기에 선생님이 배포하신 Google Apps Script 웹앱 URL을 입력하세요.
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzn_yjjw6QsOwSnBMhAw2bSgyh5uRBTMjavgKtwEGrCKaA50yxCBQq63d9WDwrGIkxm/exec"; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhO5YY-twFF2YFOS2Wm-wPCa_9NGwr9EVnwtvPOQ6pBPUxYWHOIMtdb6sbCE4xwLDw/exec"; 
         // ==========================================
 
         // 커스텀 모달 함수 (alert 대체)
@@ -148,11 +148,16 @@
             charCount.innerText = `${length.toLocaleString()} 자 (빈칸 포함)`;
         });
 
-        // 2. 피드백 받기 (Gemini API 연동)
+        // 2. 피드백 받기 (안전한 백엔드 경유 방식)
         btnFeedback.addEventListener('click', async () => {
             const text = essayContent.value.trim();
             if (!text) {
                 showAlert('입력 오류', '과제 내용을 먼저 작성해주세요.');
+                return;
+            }
+
+            if (!GOOGLE_SCRIPT_URL) {
+                showAlert('설정 오류', '선생님 설정 영역에 GOOGLE_SCRIPT_URL을 입력해주세요.');
                 return;
             }
 
@@ -163,38 +168,25 @@
             feedbackSection.classList.add('hidden');
 
             try {
-                const apiKey = ""; // API 키 환경 자동 주입
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-preview:generateContent?key=${apiKey}`;
-                
-                // 선생님의 평가 기준 프롬프트 (필요에 따라 수정 가능)
-                const systemPrompt = `당신은 따뜻하고 예리한 국어 교사입니다. 학생의 글을 다음 기준에 따라 평가하고 친절한 말투(~해요, ~습니다)로 피드백을 작성해주세요.
-                [평가 기준]
-                1. 주제의 명확성: 글이 전달하고자 하는 바가 뚜렷한가?
-                2. 논리적 전개: 문장과 문단이 자연스럽게 이어지는가?
-                3. 맞춤법 및 표현: 어색한 표현이나 띄어쓰기, 맞춤법 오류가 있는가?
-                피드백은 '잘한 점', '아쉬운 점/보완할 점', '총평' 순서로 가독성 좋게 작성해주세요.`;
-
-                const payload = {
-                    contents: [{ parts: [{ text: text }] }],
-                    systemInstruction: { parts: [{ text: systemPrompt }] }
-                };
-
-                const response = await fetch(apiUrl, {
+                // 직접 Gemini API를 호출하지 않고, 선생님의 구글 스크립트로 '피드백' 요청을 보냅니다.
+                const response = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    // CORS 오류 방지를 위해 text/plain 사용 (백엔드에서 JSON 파싱 가능)
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({
+                        action: 'feedback', // 피드백 요청임을 알림
+                        essay: text
+                    })
                 });
 
                 const result = await response.json();
-                const feedbackText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (feedbackText) {
-                    feedbackContent.innerText = feedbackText;
+                
+                if (result.status === 'success' && result.feedback) {
+                    feedbackContent.innerText = result.feedback;
                     feedbackSection.classList.remove('hidden');
-                    // 피드백 영역으로 부드럽게 스크롤
                     feedbackSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 } else {
-                    throw new Error("피드백을 생성하지 못했습니다.");
+                    throw new Error(result.message || "피드백을 생성하지 못했습니다.");
                 }
 
             } catch (error) {
@@ -228,12 +220,11 @@
                 submitBtnText.innerText = '제출 중...';
                 submitLoader.classList.remove('hidden');
                 
-                // 가상의 로딩 딜레이 (1.5초)
                 setTimeout(() => {
                     btnSubmit.disabled = false;
                     submitBtnText.innerText = '📤 과제 제출';
                     submitLoader.classList.add('hidden');
-                    showAlert('성공 (데모)', `[${id} ${name}] 학생의 과제가 제출되었습니다.\n\n(참고: 실제 구글 드라이브와 시트 연동을 위해서는 코드 내 GOOGLE_SCRIPT_URL을 선생님의 Apps Script 주소로 변경해야 합니다.)`, true);
+                    showAlert('성공 (데모)', `[${id} ${name}] 학생의 과제가 제출되었습니다.\n\n(참고: 실제 제출을 위해서는 코드 내 GOOGLE_SCRIPT_URL을 입력해야 합니다.)`, true);
                 }, 1500);
                 return;
             }
@@ -246,26 +237,22 @@
             try {
                 const response = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors', // CORS 에러 방지용
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({
+                        action: 'submit', // 제출 요청임을 알림
                         studentId: id,
                         studentName: name,
                         essay: text
                     })
                 });
                 
-                // no-cors 모드에서는 response를 읽을 수 없지만 에러가 안 났다면 성공으로 간주
-                showAlert('제출 완료', `🎉 ${name} 학생의 과제가 성공적으로 제출되었습니다. 수고하셨습니다!`, true);
+                const result = await response.json();
                 
-                // 폼 초기화 (선택 사항)
-                // studentId.value = '';
-                // studentName.value = '';
-                // essayContent.value = '';
-                // charCount.innerText = '0 자 (빈칸 포함)';
-                // feedbackSection.classList.add('hidden');
+                if (result.status === 'success') {
+                    showAlert('제출 완료', `🎉 ${name} 학생의 과제가 성공적으로 제출되었습니다. 수고하셨습니다!`, true);
+                } else {
+                    throw new Error(result.message);
+                }
                 
             } catch (error) {
                 console.error(error);
